@@ -104,7 +104,11 @@ func TestConcurrentSetup(t *testing.T) {
 				Table:   "concurrent_queue",
 				Channel: "concurrent_notify",
 			})
-			defer tr.Close()
+			defer func() {
+				if err := tr.Close(); err != nil {
+					t.Errorf("Close failed: %s", err)
+				}
+			}()
 			if err := tr.Setup(ctx); err != nil {
 				errs <- err
 			}
