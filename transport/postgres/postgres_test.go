@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -83,6 +84,37 @@ func TestSetup(t *testing.T) {
 
 	if err := tr.Setup(context.Background()); err != nil {
 		t.Fatalf("Setup failed: %s", err)
+	}
+}
+
+func TestConcurrentSetup(t *testing.T) {
+	dsn := startPostgres(t)
+	ctx := context.Background()
+
+	const n = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			tr := queuepg.NewTransport(queuepg.Config{
+				DSN:     dsn,
+				Table:   "concurrent_queue",
+				Channel: "concurrent_notify",
+			})
+			defer tr.Close()
+			if err := tr.Setup(ctx); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("concurrent Setup failed: %s", err)
 	}
 }
 

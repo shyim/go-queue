@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,10 @@ type Config struct {
 	// VisibilityTimeout is how long a message can be in "processing" before
 	// the reaper reclaims it. Defaults to 5m.
 	VisibilityTimeout time.Duration
+}
+
+func quote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func applyDefaults(c Config) Config {
@@ -101,50 +106,91 @@ func (t *Transport) Setup(ctx context.Context) error {
 		return err
 	}
 
-	ddl := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
-			id            BIGSERIAL PRIMARY KEY,
-			envelope_id   TEXT        NOT NULL,
-			type          TEXT        NOT NULL,
-			body          BYTEA       NOT NULL,
-			headers       JSONB       NOT NULL DEFAULT '{}',
-			status        TEXT        NOT NULL DEFAULT 'pending',
-			attempts      INT         NOT NULL DEFAULT 0,
-			max_attempts  INT         NOT NULL DEFAULT 0,
-			last_error    TEXT,
-			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			available_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			started_at    TIMESTAMPTZ
-		);
+	conn, err := t.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres: setup: acquire conn: %w", err)
+	}
+	defer conn.Release()
 
-		CREATE INDEX IF NOT EXISTS idx_%s_dequeue
-			ON %s (available_at, created_at)
-			WHERE status = 'pending';
-
-		CREATE OR REPLACE FUNCTION %s_notify() RETURNS trigger AS $$
-		BEGIN
-			PERFORM pg_notify('%s', NEW.id::text);
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		DROP TRIGGER IF EXISTS trg_%s_notify ON %s;
-		CREATE TRIGGER trg_%s_notify
-			AFTER INSERT ON %s
-			FOR EACH ROW EXECUTE FUNCTION %s_notify();
-	`,
-		t.config.Table,
-		t.config.Table, t.config.Table,
-		t.config.Table, t.config.Channel,
-		t.config.Table, t.config.Table,
-		t.config.Table, t.config.Table,
-		t.config.Table,
+	lockQuery := fmt.Sprintf(
+		"SELECT pg_advisory_lock(hashtext('go_queue_setup_' || %s))",
+		quote(t.config.Table),
+	)
+	unlockQuery := fmt.Sprintf(
+		"SELECT pg_advisory_unlock(hashtext('go_queue_setup_' || %s))",
+		quote(t.config.Table),
 	)
 
-	_, err := t.pool.Exec(ctx, ddl)
-	if err != nil {
-		return fmt.Errorf("postgres: setup: %w", err)
+	if _, err := conn.Exec(ctx, lockQuery); err != nil {
+		return fmt.Errorf("postgres: setup: advisory lock: %w", err)
 	}
+	defer func() {
+		_, _ = conn.Exec(ctx, unlockQuery)
+	}()
+
+	stmts := []struct {
+		label string
+		sql   string
+	}{
+		{
+			label: "create table",
+			sql: fmt.Sprintf(`
+				CREATE TABLE IF NOT EXISTS %s (
+					id            BIGSERIAL PRIMARY KEY,
+					envelope_id   TEXT        NOT NULL,
+					type          TEXT        NOT NULL,
+					body          BYTEA       NOT NULL,
+					headers       JSONB       NOT NULL DEFAULT '{}',
+					status        TEXT        NOT NULL DEFAULT 'pending',
+					attempts      INT         NOT NULL DEFAULT 0,
+					max_attempts  INT         NOT NULL DEFAULT 0,
+					last_error    TEXT,
+					created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+					available_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+					started_at    TIMESTAMPTZ
+				)`, t.config.Table),
+		},
+		{
+			label: "create index",
+			sql: fmt.Sprintf(`
+				CREATE INDEX IF NOT EXISTS idx_%s_dequeue
+					ON %s (available_at, created_at)
+					WHERE status = 'pending'`,
+				t.config.Table, t.config.Table),
+		},
+		{
+			label: "create notify function",
+			sql: fmt.Sprintf(`
+				CREATE OR REPLACE FUNCTION %s_notify() RETURNS trigger AS $$
+				BEGIN
+					PERFORM pg_notify('%s', NEW.id::text);
+					RETURN NEW;
+				END;
+				$$ LANGUAGE plpgsql`,
+				t.config.Table, t.config.Channel),
+		},
+		{
+			label: "drop trigger",
+			sql: fmt.Sprintf(
+				"DROP TRIGGER IF EXISTS trg_%s_notify ON %s",
+				t.config.Table, t.config.Table),
+		},
+		{
+			label: "create trigger",
+			sql: fmt.Sprintf(`
+				CREATE TRIGGER trg_%s_notify
+					AFTER INSERT ON %s
+					FOR EACH ROW EXECUTE FUNCTION %s_notify()`,
+				t.config.Table, t.config.Table, t.config.Table),
+		},
+	}
+
+	for _, s := range stmts {
+		if _, err := conn.Exec(ctx, s.sql); err != nil {
+			return fmt.Errorf("postgres: setup: %s: %w", s.label, err)
+		}
+	}
+
 	return nil
 }
 
