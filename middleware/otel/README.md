@@ -68,21 +68,13 @@ If your message type is too verbose for span names, you can normalize just the
 span name while keeping `messaging.message.type` unchanged:
 
 ```go
-normalize := func(messageType string) string {
-	if idx := strings.LastIndex(messageType, "."); idx >= 0 {
-		return messageType[idx+1:]
-	}
-
-	return messageType
-}
-
 bus.AddDispatchMiddleware(queueotel.DispatchMiddleware(
-	queueotel.WithSpanNameNormalizer(normalize),
+	queueotel.WithSpanNameNormalizer(queueotel.DefaultSpanNameNormalizer),
 ))
 
 worker := queue.NewWorker(bus, queue.WorkerConfig{
 	Middleware: []queue.Middleware{
-		queueotel.Middleware(queueotel.WithSpanNameNormalizer(normalize)),
+		queueotel.Middleware(queueotel.WithSpanNameNormalizer(queueotel.DefaultSpanNameNormalizer)),
 	},
 })
 ```

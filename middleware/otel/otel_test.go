@@ -2,7 +2,6 @@ package otel_test
 
 import (
 	"context"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,20 +200,6 @@ func TestTraceLinkedAcrossDispatchAndConsume(t *testing.T) {
 func TestSpanNameNormalizerChangesSpanNameOnly(t *testing.T) {
 	exporter := setupTracer(t)
 
-	normalize := func(messageType string) string {
-		lastSlash := strings.LastIndex(messageType, "/")
-		if lastSlash >= 0 {
-			messageType = messageType[lastSlash+1:]
-		}
-
-		lastDot := strings.LastIndex(messageType, ".")
-		if lastDot >= 0 {
-			messageType = messageType[lastDot+1:]
-		}
-
-		return messageType
-	}
-
 	env := &queue.Envelope{
 		Type:      "github.com/friendsofshopware/shopmon/api/internal/jobs.ShopScrape",
 		Transport: "async",
@@ -223,7 +208,7 @@ func TestSpanNameNormalizerChangesSpanNameOnly(t *testing.T) {
 	}
 
 	err := queueotel.DispatchMiddleware(
-		queueotel.WithSpanNameNormalizer(normalize),
+		queueotel.WithSpanNameNormalizer(queueotel.DefaultSpanNameNormalizer),
 	)(context.Background(), env, func(ctx context.Context, envelope *queue.Envelope) error {
 		otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier(envelope.Headers))
 		return nil
@@ -233,7 +218,7 @@ func TestSpanNameNormalizerChangesSpanNameOnly(t *testing.T) {
 	}
 
 	err = queueotel.Middleware(
-		queueotel.WithSpanNameNormalizer(normalize),
+		queueotel.WithSpanNameNormalizer(queueotel.DefaultSpanNameNormalizer),
 	)(context.Background(), env, func(ctx context.Context, envelope *queue.Envelope) error {
 		return nil
 	})

@@ -1,6 +1,8 @@
 package otel
 
 import (
+	"strings"
+
 	"github.com/shyim/go-queue"
 )
 
@@ -44,6 +46,20 @@ func WithSpanNameNormalizer(normalizer SpanNameNormalizer) Option {
 			return formatSpanName(messageType, operation)
 		}
 	}
+}
+
+// DefaultSpanNameNormalizer trims a fully-qualified Go type name down to the
+// struct name that is usually most useful in span names.
+func DefaultSpanNameNormalizer(messageType string) string {
+	if lastSlash := strings.LastIndex(messageType, "/"); lastSlash >= 0 {
+		messageType = messageType[lastSlash+1:]
+	}
+
+	if lastDot := strings.LastIndex(messageType, "."); lastDot >= 0 {
+		messageType = messageType[lastDot+1:]
+	}
+
+	return messageType
 }
 
 func defaultSpanNameFormatter(envelope *queue.Envelope, operation string) string {
