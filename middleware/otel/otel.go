@@ -38,17 +38,16 @@ const tracerName = "github.com/shyim/go-queue/middleware/otel"
 // and injects trace context into envelope headers. Register it on the bus:
 //
 //	bus.AddDispatchMiddleware(queueotel.DispatchMiddleware())
-func DispatchMiddleware() queue.Middleware {
-	return DispatchMiddlewareWithTracer(otel.Tracer(tracerName))
+func DispatchMiddleware(opts ...Option) queue.Middleware {
+	return DispatchMiddlewareWithTracer(otel.Tracer(tracerName), opts...)
 }
 
 // DispatchMiddlewareWithTracer is like DispatchMiddleware but uses a specific tracer.
-func DispatchMiddlewareWithTracer(tracer trace.Tracer) queue.Middleware {
+func DispatchMiddlewareWithTracer(tracer trace.Tracer, opts ...Option) queue.Middleware {
+	cfg := newConfig(opts...)
+
 	return func(ctx context.Context, envelope *queue.Envelope, next func(context.Context, *queue.Envelope) error) error {
-		spanName := "send"
-		if envelope.Type != "" {
-			spanName = envelope.Type + " send"
-		}
+		spanName := cfg.spanNameFormatter(envelope, "send")
 
 		attrs := []attribute.KeyValue{
 			semconv.MessagingOperationTypeSend,
@@ -91,12 +90,14 @@ func DispatchMiddlewareWithTracer(tracer trace.Tracer) queue.Middleware {
 //   - Extracts trace context from envelope headers (linking to the producer span)
 //   - Creates a consumer span with messaging semantic conventions
 //   - Records errors and sets span status
-func Middleware() queue.Middleware {
-	return MiddlewareWithTracer(otel.Tracer(tracerName))
+func Middleware(opts ...Option) queue.Middleware {
+	return MiddlewareWithTracer(otel.Tracer(tracerName), opts...)
 }
 
 // MiddlewareWithTracer is like Middleware but uses a specific tracer.
-func MiddlewareWithTracer(tracer trace.Tracer) queue.Middleware {
+func MiddlewareWithTracer(tracer trace.Tracer, opts ...Option) queue.Middleware {
+	cfg := newConfig(opts...)
+
 	return func(ctx context.Context, envelope *queue.Envelope, next func(context.Context, *queue.Envelope) error) error {
 		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(envelope.Headers))
 
@@ -115,10 +116,7 @@ func MiddlewareWithTracer(tracer trace.Tracer) queue.Middleware {
 			attrs = append(attrs, semconv.MessagingDestinationName(envelope.Transport))
 		}
 
-		spanName := "process"
-		if envelope.Type != "" {
-			spanName = envelope.Type + " process"
-		}
+		spanName := cfg.spanNameFormatter(envelope, "process")
 
 		ctx, span := tracer.Start(ctx, spanName,
 			trace.WithSpanKind(trace.SpanKindConsumer),

@@ -2,6 +2,7 @@ package otel_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -194,5 +195,73 @@ func TestTraceLinkedAcrossDispatchAndConsume(t *testing.T) {
 
 	if producerTraceID != consumerTraceID {
 		t.Errorf("trace IDs don't match: producer=%s consumer=%s", producerTraceID, consumerTraceID)
+	}
+}
+
+func TestSpanNameNormalizerChangesSpanNameOnly(t *testing.T) {
+	exporter := setupTracer(t)
+
+	normalize := func(messageType string) string {
+		lastSlash := strings.LastIndex(messageType, "/")
+		if lastSlash >= 0 {
+			messageType = messageType[lastSlash+1:]
+		}
+
+		lastDot := strings.LastIndex(messageType, ".")
+		if lastDot >= 0 {
+			messageType = messageType[lastDot+1:]
+		}
+
+		return messageType
+	}
+
+	env := &queue.Envelope{
+		Type:      "github.com/friendsofshopware/shopmon/api/internal/jobs.ShopScrape",
+		Transport: "async",
+		Body:      []byte(`{"value":"normalized"}`),
+		Headers:   map[string]string{},
+	}
+
+	err := queueotel.DispatchMiddleware(
+		queueotel.WithSpanNameNormalizer(normalize),
+	)(context.Background(), env, func(ctx context.Context, envelope *queue.Envelope) error {
+		otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier(envelope.Headers))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("producer middleware error: %v", err)
+	}
+
+	err = queueotel.Middleware(
+		queueotel.WithSpanNameNormalizer(normalize),
+	)(context.Background(), env, func(ctx context.Context, envelope *queue.Envelope) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("consumer middleware error: %v", err)
+	}
+
+	spans := exporter.GetSpans()
+	var producerFound, consumerFound bool
+	for _, s := range spans {
+		switch s.Name {
+		case "ShopScrape send":
+			producerFound = true
+		case "ShopScrape process":
+			consumerFound = true
+		}
+
+		for _, attr := range s.Attributes {
+			if attr.Key == "messaging.message.type" && attr.Value.AsString() != "github.com/friendsofshopware/shopmon/api/internal/jobs.ShopScrape" {
+				t.Fatalf("expected messaging.message.type to keep original value, got %q", attr.Value.AsString())
+			}
+		}
+	}
+
+	if !producerFound {
+		t.Fatal("expected normalized producer span name")
+	}
+	if !consumerFound {
+		t.Fatal("expected normalized consumer span name")
 	}
 }
