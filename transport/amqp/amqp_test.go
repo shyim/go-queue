@@ -65,7 +65,7 @@ func newTestTransport(t *testing.T, dsn string) *queueamqp.Transport {
 		Exchange:          "test-exchange",
 		Queue:             "test-queue",
 		RoutingKey:        "test",
-		Durable:           false,
+		Durable:           true,
 		AutoSetup:         true,
 		PublisherConfirms: true,
 		PrefetchCount:     5,
