@@ -51,7 +51,7 @@ func (b *Bus) AddDispatchMiddleware(mw ...Middleware) {
 func messageTypeName[T any]() string {
 	var zero T
 	t := reflect.TypeOf(zero)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t.PkgPath() + "." + t.Name()
