@@ -191,10 +191,12 @@ func (t *Transport) Setup(ctx context.Context) error {
 		return fmt.Errorf("amqp declare exchange: %w", err)
 	}
 
+	autoDelete := !durable
+	exclusive := !durable
 	_, err = ch.QueueDeclare(
 		t.config.Queue,
 		durable,
-		false, false, false,
+		autoDelete, exclusive, false,
 		t.queueArgs(),
 	)
 	if err != nil {
@@ -441,10 +443,12 @@ func (t *Transport) setupOnChannel(ch *amqp091.Channel) error {
 		return fmt.Errorf("declare exchange: %w", err)
 	}
 
+	autoDelete := !durable
+	exclusive := !durable
 	if _, err := ch.QueueDeclare(
 		t.config.Queue,
 		durable,
-		false, false, false,
+		autoDelete, exclusive, false,
 		t.queueArgs(),
 	); err != nil {
 		return fmt.Errorf("declare queue: %w", err)
@@ -468,7 +472,7 @@ func (t *Transport) queueArgs() amqp091.Table {
 	}
 	args := amqp091.Table{
 		"x-message-deduplication": true,
-		"x-cache-size":           int32(t.config.Deduplication.CacheSize),
+		"x-cache-size":            int32(t.config.Deduplication.CacheSize),
 	}
 	if t.config.Deduplication.CacheTTL > 0 {
 		args["x-cache-ttl"] = int32(t.config.Deduplication.CacheTTL)
@@ -494,10 +498,10 @@ func (t *Transport) exchangeArgs() amqp091.Table {
 
 func deliveryToEnvelope(d amqp091.Delivery) *queue.Envelope {
 	env := &queue.Envelope{
-		Body:        d.Body,
-		ID:          d.MessageId,
+		Body:          d.Body,
+		ID:            d.MessageId,
 		TransportData: d.DeliveryTag,
-		Headers:     make(map[string]string),
+		Headers:       make(map[string]string),
 	}
 
 	var attempt, maxRetries int

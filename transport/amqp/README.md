@@ -26,20 +26,20 @@ bus.Setup(ctx)
 ## Configuration
 
 ```go
-amqp.Config{
-	DSN:               "amqp://guest:guest@localhost:5672/",
-	Exchange:          "myapp",           // exchange name (default: "messages")
-	ExchangeType:      "direct",          // direct, topic, fanout, headers (default: "direct")
-	Queue:             "tasks",           // queue name (default: "default")
-	RoutingKey:        "tasks",           // routing key (default: "default")
-	PrefetchCount:     10,                // consumer prefetch (default: 10)
-	Durable:           true,              // survive broker restart (default: true)
-	AutoSetup:         true,              // auto-declare exchange/queue/binding (default: true)
-	ReconnectDelay:    5 * time.Second,   // delay between reconnection attempts (default: 5s)
-	PublisherConfirms: true,              // wait for broker ack on publish (default: true)
-	DelayedExchange:   false,             // see Delayed Messages below
-	Deduplication:     nil,               // see Deduplication below
-}
+	amqp.Config{
+		DSN:               "amqp://guest:guest@localhost:5672/",
+		Exchange:          "myapp",           // exchange name (default: "messages")
+		ExchangeType:      "direct",          // direct, topic, fanout, headers (default: "direct")
+		Queue:             "tasks",           // queue name (default: "default")
+		RoutingKey:        "tasks",           // routing key (default: "default")
+		PrefetchCount:     10,                // consumer prefetch (default: 10)
+		Durable:           true,              // survive broker restart (default: true). When false, the queue is declared exclusive + auto-delete (RabbitMQ 4 compatibility)
+		AutoSetup:         true,              // auto-declare exchange/queue/binding (default: true)
+		ReconnectDelay:    5 * time.Second,   // delay between reconnection attempts (default: 5s)
+		PublisherConfirms: true,              // wait for broker ack on publish (default: true)
+		DelayedExchange:   false,             // see Delayed Messages below
+		Deduplication:     nil,               // see Deduplication below
+	}
 ```
 
 ## Features
