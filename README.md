@@ -111,7 +111,10 @@ worker := queue.NewWorker(bus, queue.WorkerConfig{
 	Concurrency:     8,
 	HandlerTimeout:  30 * time.Second,
 	ShutdownTimeout: 60 * time.Second, // default 30s
+	Logger:          slog.Default(),   // defaults to slog.Default()
 
+	// Defaults: 3 retries, 1s base delay, 2x multiplier, 30s max, 10% jitter.
+	// Call queue.DefaultRetryStrategy() to start from the defaults.
 	RetryStrategy: queue.RetryStrategy{
 		MaxRetries: 5,
 		Delay:      1 * time.Second,
@@ -212,6 +215,19 @@ worker := queue.NewWorker(bus, queue.WorkerConfig{
 		queueotel.MetricsMiddleware(), // metrics
 	},
 })
+```
+
+By default span names use the full Go type path (e.g. `github.com/myorg/myapp/jobs.SendEmail send`). Use `WithSpanNameNormalizer` to shorten them:
+
+```go
+// queueotel.DefaultSpanNameNormalizer trims to the bare struct name: "SendEmail send"
+queueotel.Middleware(queueotel.WithSpanNameNormalizer(queueotel.DefaultSpanNameNormalizer))
+
+// Or supply your own:
+queueotel.Middleware(queueotel.WithSpanNameNormalizer(func(t string) string {
+	// t is the full type string; return whatever you want in the span name
+	return myNormalize(t)
+}))
 ```
 
 See [`middleware/otel`](middleware/otel/) for details on spans, attributes, and metrics.
