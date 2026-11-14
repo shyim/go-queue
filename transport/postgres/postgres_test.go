@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -319,7 +320,9 @@ func TestIntegrationWithBusAndWorker(t *testing.T) {
 		}
 	}
 
-	<-done
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker.Run failed: %s", err)
+	}
 
 	if n := handled.Load(); n != 1 {
 		t.Errorf("handler called %d times, want 1", n)

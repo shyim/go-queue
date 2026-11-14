@@ -3,6 +3,7 @@ package amqp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -318,7 +319,9 @@ func TestIntegrationWithBusAndWorker(t *testing.T) {
 		}
 	}
 
-	<-done
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("worker.Run failed: %s", err)
+	}
 
 	if n := handled.Load(); n != 1 {
 		t.Errorf("handler called %d times, want 1", n)
@@ -346,5 +349,59 @@ func TestClose(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error sending after Close")
+	}
+}
+
+func TestReceiveCancelAndClose(t *testing.T) {
+	dsn := startRabbitMQ(t)
+	for i := 0; i < 10; i++ {
+		tr := newTestTransport(t, dsn)
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := tr.Setup(ctx); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		deliveries, err := tr.Receive(ctx)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if err := tr.Send(ctx, &queue.Envelope{ID: "cancel-close", Body: []byte(`{}`)}); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		select {
+		case env := <-deliveries:
+			if env == nil {
+				cancel()
+				t.Fatal("deliveries closed before receiving message")
+			}
+			if err := tr.Ack(ctx, env); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			cancel()
+			t.Fatal("timed out waiting for message")
+		}
+		cancel()
+		done := make(chan error, 1)
+		go func() { done <- tr.Close() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Close failed: %s", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Close hung after cancelling Receive")
+		}
+		select {
+		case _, ok := <-deliveries:
+			if ok {
+				t.Fatal("deliveries should be closed")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Receive did not stop after cancellation")
+		}
 	}
 }

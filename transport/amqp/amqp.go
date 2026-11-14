@@ -347,8 +347,10 @@ func (t *Transport) consumeLoop(ctx context.Context, out chan<- *queue.Envelope)
 
 		chClosed := ch.NotifyClose(make(chan *amqp091.Error, 1))
 
-		deliveries, err := ch.ConsumeWithContext(
-			ctx,
+		// The drain loop handles cancellation and closes the channel. Using
+		// ConsumeWithContext as well would race its basic.cancel RPC against
+		// channel.close, allowing either call to consume the other's reply.
+		deliveries, err := ch.Consume(
 			t.config.Queue,
 			"",
 			false, false, false, false,
@@ -468,7 +470,7 @@ func (t *Transport) queueArgs() amqp091.Table {
 	}
 	args := amqp091.Table{
 		"x-message-deduplication": true,
-		"x-cache-size":           int32(t.config.Deduplication.CacheSize),
+		"x-cache-size":            int32(t.config.Deduplication.CacheSize),
 	}
 	if t.config.Deduplication.CacheTTL > 0 {
 		args["x-cache-ttl"] = int32(t.config.Deduplication.CacheTTL)
@@ -494,10 +496,10 @@ func (t *Transport) exchangeArgs() amqp091.Table {
 
 func deliveryToEnvelope(d amqp091.Delivery) *queue.Envelope {
 	env := &queue.Envelope{
-		Body:        d.Body,
-		ID:          d.MessageId,
+		Body:          d.Body,
+		ID:            d.MessageId,
 		TransportData: d.DeliveryTag,
-		Headers:     make(map[string]string),
+		Headers:       make(map[string]string),
 	}
 
 	var attempt, maxRetries int
